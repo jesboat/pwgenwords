@@ -1,0 +1,89 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use 5.010;
+
+use Getopt::Long;
+use Bytes::Random::Secure qw(random_string_from);
+use FindBin qw($RealBin);
+
+use constant {
+        DEFAULT_BITS_WANT => 48,
+        DEFAULT_WORDLIST => "$RealBin/wordlist.json",
+    };
+
+
+
+# Parse options
+my $bits_want = DEFAULT_BITS_WANT;
+my $wordlistfile = DEFAULT_WORDLIST;
+my $verbose = 0;
+GetOptions(
+        "bits=i" => \$bits_want,
+        "wordlist=s" => \$wordlistfile,
+        "v|verbose" => \$verbose,
+    ) and !@ARGV
+    or die <<USAGE
+Usage: $0 [--bits n] [--verbose]
+
+  --bits=n  Minimum entropy in resulting password (default @{[DEFAULT_BITS_WANT]}
+  --verbose Print extra info about generation process (formatted as YAML)
+USAGE
+        ;
+
+# Read the wordlist.
+my $wordlist = do "$wordlistfile"
+        or die "$wordlistfile: '$@' or '$!'";
+
+# How many words do we need?
+my $bits_per_word = log(0 + @$wordlist)/log(2);
+my $words_needed = ceil($bits_want / $bits_per_word);
+
+# We build a string (i.e. sequence of Unicode characters) where each
+# character's codepoint is an index into @$wordlist
+my $sourcestr;
+$sourcestr .= chr for 0 .. $#$wordlist; # not as inefficient as it looks
+
+# Then, we pick a random string using $sourcestr as a character set...
+my $indices = random_string_from($sourcestr, $words_needed);
+
+# ...and then map each character back to the corresponding word in @$wordlist.
+my @words = (map { $wordlist->[ord $_] } split(//, $indices));
+
+# Print the result
+if ($verbose) {
+    printf "---\n";
+    printf "dictionary_size: %u\n", 0+@$wordlist;
+    printf "bits_per_word: %s\n", fmtbits($bits_per_word);
+    printf "bits_wanted: %u\n", ($bits_want);
+    printf "bits_got: %s\n", fmtbits($bits_per_word * $words_needed);
+    printf "num_words_used: %u\n", $words_needed;
+    printf "pass_words: [%s]\n", (join ", ", @words);
+    printf "pass: %s\n", (join " ", @words);
+    printf "...\n";
+} else {
+    print "@words\n";
+}
+
+
+
+sub ceil {
+    my ($n) = @_;
+    if ($n == int $n) {
+        return $n;
+    } else {
+        return int($n + 1);
+    }
+}
+
+sub fmtbits {
+    my ($n) = @_;
+    given (int $n) {
+        when ($n)              { return $_ }
+        when ($n <= $_ + 0.01) { return $_ + 0.01 }
+        when ($n >= $_ + 0.99) { return $_ + 0.99 }
+        default                { return sprintf "%.02f", $n }
+    }
+}
+
